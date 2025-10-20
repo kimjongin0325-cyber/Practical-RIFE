@@ -1,4 +1,3 @@
-# /content/Practical-RIFE/train_log/RIFE_HDv3.py
 import torch
 import torch.nn as nn
 import numpy as np
@@ -8,7 +7,7 @@ import itertools
 import sys
 import os
 
-# 경로 추가
+# 경로 추가 (에러 해결용)
 BASE_DIR = "/content/Practical-RIFE"
 sys.path.append(os.path.join(BASE_DIR, 'model'))  # warplayer, loss
 from warplayer import warp  # 수정: model.warplayer → warplayer
