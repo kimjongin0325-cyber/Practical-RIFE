@@ -7,7 +7,7 @@ import itertools
 import sys
 import os
 
-# 경로 추가 (에러 해결용)
+# 경로 추가
 BASE_DIR = "/content/Practical-RIFE"
 sys.path.append(os.path.join(BASE_DIR, 'model'))  # warplayer, loss
 from warplayer import warp  # 수정: model.warplayer → warplayer
