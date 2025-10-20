@@ -1,16 +1,25 @@
+%%writefile /content/Practical-RIFE/train_log/inference_img.py
 import os
 import cv2
 import torch
 import numpy as np
 import argparse
-from model.RIFE_HDv3 import Model
+import sys
 
 # =========================================================
 # ⚙️ 경로 설정
 # =========================================================
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))       # /content/Practical-RIFE/train_log
+PROJECT_DIR = os.path.dirname(CURRENT_DIR)                     # /content/Practical-RIFE
+
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)  # train_log 안에서 import 가능하게
+
+from RIFE_HDv3 import Model   # ✅ 같은 폴더 안에서 가져오기
+
 INPUT_DIR = '/content/Practical-RIFE/input_frames'   # 입력 프레임 폴더
 OUTPUT_DIR = '/content/Practical-RIFE/output'        # 결과 저장 폴더
-MODEL_PATH = '/content/Practical-RIFE/train_log/flownet.pkl'
+MODEL_PATH = os.path.join(CURRENT_DIR, 'flownet.pkl')
 
 # =========================================================
 # 🧠 모델 초기화
@@ -25,20 +34,18 @@ model.device()
 # 📥 입력 인자 파싱
 # =========================================================
 parser = argparse.ArgumentParser()
-parser.add_argument('--img', nargs=2, help='두 개의 입력 프레임 경로')
+parser.add_argument('--img', nargs=2, required=True, help='두 개의 입력 프레임 경로')
 args = parser.parse_args()
 
 # =========================================================
 # 🖼️ 입력 이미지 로드
 # =========================================================
-img1_name = os.path.basename(args.img[0])
-img2_name = os.path.basename(args.img[1])
-
-I0 = cv2.imread(os.path.join(INPUT_DIR, img1_name))
-I1 = cv2.imread(os.path.join(INPUT_DIR, img2_name))
+img1_path, img2_path = args.img
+I0 = cv2.imread(img1_path)
+I1 = cv2.imread(img2_path)
 
 if I0 is None or I1 is None:
-    raise FileNotFoundError(f"❌ 입력 이미지 로드 실패:\n {img1_name}\n {img2_name}")
+    raise FileNotFoundError(f"❌ 입력 이미지 로드 실패:\n - {img1_path}\n - {img2_path}")
 
 h, w, _ = I0.shape
 ph = ((h - 1) // 32 + 1) * 32
