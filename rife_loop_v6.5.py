@@ -2,15 +2,24 @@
 # ✅ [코랩 최적화 RIFE Interpolation Loop v6.5-FINAL]
 # - RIFE_HDv3.py + IFNet_HDv3.py + warplayer.py + loss.py
 # - 경로: train_log (RIFE_HDv3, IFNet_HDv3, flownet.pkl), model (warplayer, loss)
-# - v3.1 호환 + scale/timestep 지원
+# - v3.1 호환 + scale/timestep 지원 + 경로 문제 해결
 # =====================================================
 import os, glob, torch, shutil, re, time
 import numpy as np, cv2
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 
-# -------------------- 사용자 옵션 (v3.1 호환) --------------------
+# -------------------- 작업 디렉토리 및 경로 설정 --------------------
 BASE_DIR = "/content/Practical-RIFE"
+os.chdir(BASE_DIR)  # 작업 디렉토리 변경
+sys.path.append(os.path.join(BASE_DIR, 'train_log'))  # RIFE_HDv3, IFNet_HDv3
+sys.path.append(os.path.join(BASE_DIR, 'model'))      # warplayer, loss
+
+# 디버깅: 현재 경로와 sys.path 출력
+print(f"현재 작업 디렉토리: {os.getcwd()}")
+print(f"sys.path: {sys.path}")
+
+# -------------------- 사용자 옵션 (v3.1 호환) --------------------
 opt = {
     "scale": 2,  # 보간 배율 (2=2x FPS, 4=4x FPS 등)
     "device": "cuda",
@@ -24,8 +33,6 @@ opt = {
 }
 
 # -------------------- RIFE 모델 및 추론 함수 --------------------
-sys.path.append(os.path.join(BASE_DIR, 'train_log'))  # RIFE_HDv3, IFNet_HDv3
-sys.path.append(os.path.join(BASE_DIR, 'model'))      # warplayer, loss
 try:
     from RIFE_HDv3 import Model
 except ImportError:
@@ -40,7 +47,14 @@ device = torch.device(opt["device"] if torch.cuda.is_available() else "cpu")
 
 print("⚡ RIFE 모델 로딩 중...")
 rife_model = Model()
-rife_model.load_model(opt["model_path"])
+try:
+    rife_model.load_model(opt["model_path"])
+except FileNotFoundError:
+    print("="*80)
+    print(f"🚨 오류: 모델 파일을 찾을 수 없습니다! 경로: {opt['model_path']}")
+    print("리포지토리에서 flownet.pkl을 다운로드 후 train_log 폴더에 넣어주세요.")
+    print("="*80)
+    raise
 rife_model.eval()
 rife_model.device()
 print("✅ 모델 로딩 완료.")
