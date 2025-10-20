@@ -1,4 +1,3 @@
-# /content/Practical-RIFE/train_log/RIFE_HDv3.py
 import torch
 import torch.nn as nn
 import numpy as np
@@ -17,7 +16,7 @@ import torch.nn.functional as F
 from loss import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
 class Model:
     def __init__(self, local_rank=-1):
         self.flownet = IFNet()
@@ -53,7 +52,7 @@ class Model:
                 self.flownet.load_state_dict(convert(torch.load('{}/flownet.pkl'.format(path))), False)
             else:
                 self.flownet.load_state_dict(convert(torch.load('{}/flownet.pkl'.format(path), map_location='cpu')), False)
-        
+
     def save_model(self, path, rank=0):
         if rank == 0:
             torch.save(self.flownet.state_dict(), '{}/flownet.pkl'.format(path))
@@ -63,7 +62,7 @@ class Model:
         scale_list = [4/scale, 2/scale, 1/scale]
         flow, mask, merged = self.flownet(imgs, scale_list)
         return merged[2]
-    
+
     def update(self, imgs, gt, learning_rate=0, mul=1, training=True, flow_gt=None):
         for param_group in self.optimG.param_groups:
             param_group['lr'] = learning_rate
@@ -80,15 +79,12 @@ class Model:
         # loss_vgg = self.vgg(merged[2], gt)
         if training:
             self.optimG.zero_grad()
-            loss_G = loss_cons + loss_smooth * 0.1
+            loss_G = loss_l1 + loss_smooth * 0.1
             loss_G.backward()
             self.optimG.step()
-        else:
-            flow_teacher = flow[2]
         return merged[2], {
             'mask': mask,
             'flow': flow[2][:, :2],
             'loss_l1': loss_l1,
-            'loss_cons': loss_cons,
             'loss_smooth': loss_smooth,
         }
