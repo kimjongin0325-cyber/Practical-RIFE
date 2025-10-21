@@ -17,7 +17,7 @@ def _import_model(pyfile):
 # -----------------------------------------------------
 # 모델 경로 감지
 # -----------------------------------------------------
-v425_py = os.path.join(BASE_DIR, "ifnet_hd3_v425.py")
+v425_py = os.path.join(BASE_DIR, "rife_hd3_v425.py")   # ✅ 수정 완료
 v425_pkl = os.path.join(BASE_DIR, "flownet_v425.pkl")
 
 v38_py = os.path.join(BASE_DIR, "rife_hd3.py")
@@ -29,7 +29,7 @@ try:
     if os.path.exists(v425_py) and os.path.exists(v425_pkl):
         mod = _import_model(v425_py)
         Model = mod.Model
-        print("✅ RIFE v4.25 감지됨 → ifnet_hd3_v425.py 사용")
+        print("✅ RIFE v4.25 감지됨 → rife_hd3_v425.py 사용")
     elif os.path.exists(v38_py) and os.path.exists(v38_pkl):
         mod = _import_model(v38_py)
         Model = mod.Model
@@ -38,4 +38,3 @@ try:
         raise FileNotFoundError("❌ RIFE 모델 파일을 찾을 수 없습니다.")
 except Exception as e:
     raise ImportError(f"[FATAL] RIFE 모델 import 실패: {e}")
-
