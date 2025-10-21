@@ -6,7 +6,7 @@ import torch.optim as optim
 import itertools
 from model.warplayer import warp
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train_log.IFNet_HDv3 import *
+from train_log.ifnet425 import *     # ✅ 수정됨 (IFNet_HDv3 → ifnet425)
 import torch.nn.functional as F
 from model.loss import *
 
@@ -45,13 +45,13 @@ class Model:
                 return param
         if rank <= 0:
             if torch.cuda.is_available():
-                self.flownet.load_state_dict(convert(torch.load('{}/flownet.pkl'.format(path))), False)
+                self.flownet.load_state_dict(convert(torch.load(f'{path}/flownet.pkl')), False)
             else:
-                self.flownet.load_state_dict(convert(torch.load('{}/flownet.pkl'.format(path), map_location ='cpu')), False)
+                self.flownet.load_state_dict(convert(torch.load(f'{path}/flownet.pkl', map_location='cpu')), False)
         
     def save_model(self, path, rank=0):
         if rank == 0:
-            torch.save(self.flownet.state_dict(),'{}/flownet.pkl'.format(path))
+            torch.save(self.flownet.state_dict(), f'{path}/flownet.pkl')
 
     def inference(self, img0, img1, timestep=0.5, scale=1.0):
         imgs = torch.cat((img0, img1), 1)
@@ -78,12 +78,3 @@ class Model:
             loss_G = loss_l1 + loss_cons + loss_smooth * 0.1
             loss_G.backward()
             self.optimG.step()
-        else:
-            flow_teacher = flow[2]
-        return merged[-1], {
-            'mask': mask,
-            'flow': flow[-1][:, :2],
-            'loss_l1': loss_l1,
-            'loss_cons': loss_cons,
-            'loss_smooth': loss_smooth,
-            }
