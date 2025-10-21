@@ -18,7 +18,7 @@ opt = {
     "device": "cuda" if torch.cuda.is_available() else "cpu",
     "input_dir":  f"{BASE_DIR}/output",   # ✅ v3.1 FastSafe가 만든 결과
     "output_dir": f"{BASE_DIR}/output2",  # ✅ 최종 출력
-    "model_path": f"{BASE_DIR}/train_log/flownet.pkl",  # ← 4.25 가중치여야 함
+    "model_path": f"{BASE_DIR}/train_log/flownet_v425.pkl",  # ← 4.25 가중치여야 함
 }
 
 os.makedirs(opt["input_dir"], exist_ok=True)
