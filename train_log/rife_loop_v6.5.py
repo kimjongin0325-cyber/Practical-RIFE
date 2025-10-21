@@ -2,6 +2,7 @@
 # ✅ [실전용 RIFE Interpolation Loop v6.5-Remodel]
 # - Colab/Kaggle 완전 호환
 # - 1000장 이상 대량 프레임 안정 지원
+# - SSIM 품질 평가 추가
 # =====================================================
 import os, sys, glob, torch, shutil, re, time
 import numpy as np, cv2
@@ -23,11 +24,12 @@ sys.path.extend([
 print(f"✅ 경로 준비 완료: {BASE_DIR}")
 print(f"sys.path 추가 완료: {sys.path[-3:]}")
 print(f"train_log/__init__.py 존재: {os.path.exists(os.path.join(BASE_DIR, 'train_log', '__init__.py'))}")
+print(f"pytorch_msssim/__init__.py 존재: {os.path.exists(os.path.join(BASE_DIR, 'model', 'pytorch_msssim', '__init__.py'))}")
 
 # -------------------- [2] 사용자 옵션 --------------------
 opt = {
     "scale": 2,             # 2=2x FPS, 4=4x FPS 등
-    "threads": min(os.cpu_count(), 8),  # 1000장 처리 최적화
+    "threads": min(os.cpu_count(), 4),  # T4 환경 최적화
     "fps_limit": 60,        # FFmpeg 병합 시 FPS
     "device": "cuda" if torch.cuda.is_available() else "cpu",
     "input_dir": os.path.join(BASE_DIR, "input_frames"),
@@ -37,10 +39,18 @@ opt = {
 
 # -------------------- [3] RIFE 모델 로드 --------------------
 try:
-    from train_log import Model  # 패키지 import로 변경
+    from train_log import Model
     print("✅ train_log.Model import 성공!")
 except ImportError as e:
     raise ImportError(f"🚨 train_log.Model import 실패: {e}. train_log/__init__.py 확인하세요.")
+
+# SSIM 손실 함수 로드
+try:
+    from model import SSIM
+    ssim_loss = SSIM(window_size=11, size_average=True).to(opt["device"])
+    print("✅ SSIM 손실 함수 로드 성공!")
+except ImportError as e:
+    print(f"⚠️ SSIM import 실패: {e}. pytorch_msssim/__init__.py 확인하세요.")
 
 device = torch.device(opt["device"])
 rife_model = Model()
@@ -57,14 +67,25 @@ except Exception as e:
 def run_rife_inference(img0_bgr, img1_bgr, timestep=0.5):
     if img0_bgr is None or img1_bgr is None:
         return None
+    # T4 메모리 최적화: 4K 이미지 다운스케일
+    if img0_bgr.shape[0] > 1080:
+        img0_bgr = cv2.resize(img0_bgr, (1920, 1080))
+        img1_bgr = cv2.resize(img1_bgr, (1920, 1080))
     img0 = cv2.cvtColor(img0_bgr, cv2.COLOR_BGR2RGB)
     img1 = cv2.cvtColor(img1_bgr, cv2.COLOR_BGR2RGB)
     I0 = torch.from_numpy(img0).permute(2, 0, 1).unsqueeze(0).float() / 255.0
     I1 = torch.from_numpy(img1).permute(2, 0, 1).unsqueeze(0).float() / 255.0
     I0, I1 = I0.to(device), I1.to(device)
-    out_img = rife_model.inference(I0, I1, scale=max(1.0, 1.0 / timestep))  # scale 조정
+    out_img = rife_model.inference(I0, I1, scale=max(1.0, 1.0 / timestep))
     out = (out_img[0].cpu().numpy().transpose(1, 2, 0) * 255.0).clip(0, 255).astype(np.uint8)
-    return cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
+    out_bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
+    # SSIM 계산
+    if 'ssim_loss' in globals():
+        out_tensor = torch.from_numpy(out).permute(2, 0, 1).unsqueeze(0).float().to(device) / 255.0
+        img1_tensor = torch.from_numpy(img1).permute(2, 0, 1).unsqueeze(0).float().to(device) / 255.0
+        ssim_value = 1 - 2 * ssim_loss(out_tensor, img1_tensor)  # SSIM (0~1)
+        return out_bgr, ssim_value
+    return out_bgr, None
 
 # -------------------- [5] 프레임 초기화 --------------------
 torch.backends.cudnn.deterministic = True
@@ -96,7 +117,11 @@ shutil.copy(frame_files[0], os.path.join(OUTPUT_DIR, f"img00000.png"))
 def preload_pair(i):
     try:
         f1, f2 = frame_files[i], frame_files[i+1]
-        return (i, cv2.imread(f1), cv2.imread(f2))
+        img1 = cv2.imread(f1)
+        img2 = cv2.imread(f2)
+        if img1 is None or img2 is None:
+            raise ValueError(f"프레임 로드 실패: {f1} 또는 {f2}")
+        return (i, img1, img2)
     except Exception as e:
         print(f"⚠️ 프레임 {i} 로드 실패: {e}")
         return (i, None, None)
@@ -126,15 +151,15 @@ for i in range(num_frames - 1):
 
     for j in range(1, opt["scale"]):
         t = j / opt["scale"]
-        out = run_rife_inference(img0, img1, timestep=t)
+        out, ssim_value = run_rife_inference(img0, img1, timestep=t)
         if out is None or np.isnan(out).any() or np.max(out) == 0:
             print(f"❌ NaN 감지 (t={t}) → 스킵")
             continue
         dst = os.path.join(OUTPUT_DIR, f"img{idx + j:05d}.png")
         cv2.imwrite(dst, out)
-        print(f"✅ 보간 프레임 저장: {os.path.basename(dst)}")
+        print(f"✅ 보간 프레임 저장: {os.path.basename(dst)} (SSIM: {ssim_value:.4f} if available)")
         success += 1
-        torch.cuda.empty_cache()  # 메모리 해제
+        torch.cuda.empty_cache()  # T4 메모리 관리
 
     idx += opt["scale"]
     shutil.copy(frame_files[i+1], os.path.join(OUTPUT_DIR, f"img{idx:05d}.png"))
