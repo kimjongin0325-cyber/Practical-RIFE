@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from model.warplayer import warp
-# from train_log.refine import *
+# from train_log.refine425 import *   # ✅ 수정됨 (refine → refine425)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -45,8 +45,7 @@ class Head(nn.Module):
 class ResConv(nn.Module):
     def __init__(self, c, dilation=1):
         super(ResConv, self).__init__()
-        self.conv = nn.Conv2d(c, c, 3, 1, dilation, dilation=dilation, groups=1\
-)
+        self.conv = nn.Conv2d(c, c, 3, 1, dilation, dilation=dilation, groups=1)
         self.beta = nn.Parameter(torch.ones((1, c, 1, 1)), requires_grad=True)
         self.relu = nn.LeakyReLU(0.2, True)
 
