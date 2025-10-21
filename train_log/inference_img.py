@@ -1,118 +1,87 @@
-import os
-import cv2
-import torch
-import argparse
-from torch.nn import functional as F
-import warnings
-warnings.filterwarnings("ignore")
+# =====================================================
+# ✅ [RIFE v4.25 Fine Detail Edition – FP16 + CUDA Stream]
+# - ifnet_hd3_v425.py + flownet_v425.pkl 조합 전용
+# - FP16 가속 / SSIM 선택적 / 1080~2K 안정화
+# =====================================================
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-torch.set_grad_enabled(False)
-if torch.cuda.is_available():
-    torch.backends.cudnn.enabled = True
-    torch.backends.cudnn.benchmark = True
+import os, cv2, torch, time
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 
-parser = argparse.ArgumentParser(description='Interpolation for a pair of images')
-parser.add_argument('--img', dest='img', nargs=2, required=True)
-parser.add_argument('--exp', default=4, type=int)
-parser.add_argument('--ratio', default=0, type=float, help='inference ratio between two images with 0 - 1 range')
-parser.add_argument('--rthreshold', default=0.02, type=float, help='returns image when actual ratio falls in given range threshold')
-parser.add_argument('--rmaxcycles', default=8, type=int, help='limit max number of bisectional cycles')
-parser.add_argument('--model', dest='modelDir', type=str, default='train_log', help='directory with trained model files')
+# -------------------- 사용자 옵션 --------------------
+opt = {
+    "input_dir": "/content/Practical-RIFE/input_frames",
+    "output_dir": "/content/Practical-RIFE/output",
+    "model_py": "/content/Practical-RIFE/train_log/ifnet_hd3_v425.py",
+    "model_path": "/content/Practical-RIFE/train_log/flownet_v425.pkl",
+    "device": "cuda" if torch.cuda.is_available() else "cpu",
+    "threads": 8,
+    "use_ssim": False,
+    "fp16": True,
+}
 
-args = parser.parse_args()
+# -------------------- Torch 초기화 --------------------
+torch.backends.cudnn.benchmark = True
+device = torch.device(opt["device"])
+stream = torch.cuda.Stream(device=device)
 
+# -------------------- 모델 로드 --------------------
+import importlib.util
+spec = importlib.util.spec_from_file_location("model_v425", opt["model_py"])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+Model = module.Model
+
+model = Model()
+model.load_model(os.path.dirname(opt["model_path"]))
+model.eval().to(device)
+print(f"✅ RIFE v4.25 모델 로딩 완료: {opt['model_path']}")
+
+# -------------------- SSIM 로드 --------------------
 try:
-    try:
-        from model.RIFE_HDv2 import Model
-        model = Model()
-        model.load_model(args.modelDir, -1)
-        print("Loaded v2.x HD model.")
-    except:
-        from train_log.RIFE_HDv3 import Model
-        model = Model()
-        model.load_model(args.modelDir, -1)
-        print("Loaded v3.x HD model.")
-except:
-    from model.RIFE_HD import Model
-    model = Model()
-    model.load_model(args.modelDir, -1)
-    print("Loaded v1.x HD model")
-if not hasattr(model, 'version'):
-    model.version = 0
-model.eval()
-model.device()
+    from model import SSIM
+    ssim_loss = SSIM(window_size=11, size_average=True).to(device)
+except Exception:
+    ssim_loss = None
 
-if args.img[0].endswith('.exr') and args.img[1].endswith('.exr'):
-    img0 = cv2.imread(args.img[0], cv2.IMREAD_COLOR | cv2.IMREAD_ANYDEPTH)
-    img1 = cv2.imread(args.img[1], cv2.IMREAD_COLOR | cv2.IMREAD_ANYDEPTH)
-    img0 = (torch.tensor(img0.transpose(2, 0, 1)).to(device)).unsqueeze(0)
-    img1 = (torch.tensor(img1.transpose(2, 0, 1)).to(device)).unsqueeze(0)
+# -------------------- 보간 함수 --------------------
+@torch.inference_mode()
+def infer(img0, img1, t=0.5):
+    img0 = cv2.cvtColor(img0, cv2.COLOR_BGR2RGB)
+    img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
+    I0 = torch.from_numpy(img0).permute(2,0,1).unsqueeze(0).float().to(device) / 255.
+    I1 = torch.from_numpy(img1).permute(2,0,1).unsqueeze(0).float().to(device) / 255.
 
-else:
-    img0 = cv2.imread(args.img[0], cv2.IMREAD_UNCHANGED)
-    img1 = cv2.imread(args.img[1], cv2.IMREAD_UNCHANGED)
-    img0 = cv2.resize(img0, (448, 256))
-    img1 = cv2.resize(img1, (448, 256))
-    img0 = (torch.tensor(img0.transpose(2, 0, 1)).to(device) / 255.).unsqueeze(0)
-    img1 = (torch.tensor(img1.transpose(2, 0, 1)).to(device) / 255.).unsqueeze(0)
-
-n, c, h, w = img0.shape
-ph = ((h - 1) // 64 + 1) * 64
-pw = ((w - 1) // 64 + 1) * 64
-padding = (0, pw - w, 0, ph - h)
-img0 = F.pad(img0, padding)
-img1 = F.pad(img1, padding)
-
-
-if args.ratio:
-    if model.version >= 3.9:
-        img_list = [img0, model.inference(img0, img1, args.ratio), img1]
-    else:
-        img0_ratio = 0.0
-        img1_ratio = 1.0
-        if args.ratio <= img0_ratio + args.rthreshold / 2:
-            middle = img0
-        elif args.ratio >= img1_ratio - args.rthreshold / 2:
-            middle = img1
+    with torch.cuda.stream(stream):
+        if opt["fp16"]:
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                pred = model.inference(I0, I1, t)
         else:
-            tmp_img0 = img0
-            tmp_img1 = img1
-            for inference_cycle in range(args.rmaxcycles):
-                middle = model.inference(tmp_img0, tmp_img1)
-                middle_ratio = ( img0_ratio + img1_ratio ) / 2
-                if args.ratio - (args.rthreshold / 2) <= middle_ratio <= args.ratio + (args.rthreshold / 2):
-                    break
-                if args.ratio > middle_ratio:
-                    tmp_img0 = middle
-                    img0_ratio = middle_ratio
-                else:
-                    tmp_img1 = middle
-                    img1_ratio = middle_ratio
-        img_list.append(middle)
-        img_list.append(img1)
-else:
-    if model.version >= 3.9:
-        img_list = [img0]        
-        n = 2 ** args.exp
-        for i in range(n-1):
-            img_list.append(model.inference(img0, img1, (i+1) * 1. / n))
-        img_list.append(img1)
-    else:
-        img_list = [img0, img1]
-        for i in range(args.exp):
-            tmp = []
-            for j in range(len(img_list) - 1):
-                mid = model.inference(img_list[j], img_list[j + 1])
-                tmp.append(img_list[j])
-                tmp.append(mid)
-            tmp.append(img1)
-            img_list = tmp
+            pred = model.inference(I0, I1, t)
+        torch.cuda.synchronize()
 
-if not os.path.exists('output'):
-    os.mkdir('output')
-for i in range(len(img_list)):
-    if args.img[0].endswith('.exr') and args.img[1].endswith('.exr'):
-        cv2.imwrite('output/img{}.exr'.format(i), (img_list[i][0]).cpu().numpy().transpose(1, 2, 0)[:h, :w], [cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_HALF])
-    else:
-        cv2.imwrite('output/img{}.png'.format(i), (img_list[i][0] * 255).byte().cpu().numpy().transpose(1, 2, 0)[:h, :w])
+    out_img = (pred[0].cpu().numpy().transpose(1,2,0) * 255).astype(np.uint8)
+    out_img = cv2.cvtColor(out_img, cv2.COLOR_RGB2BGR)
+    ssim_val = None
+    if opt["use_ssim"] and ssim_loss is not None:
+        ssim_val = float(ssim_loss(pred, I1).item())
+    return out_img, ssim_val
+
+# -------------------- 프레임 보간 루프 --------------------
+os.makedirs(opt["output_dir"], exist_ok=True)
+frames = sorted([f for f in os.listdir(opt["input_dir"]) if f.endswith(".png")])
+start = time.time()
+
+with ThreadPoolExecutor(max_workers=opt["threads"]) as ex:
+    for i in range(len(frames) - 1):
+        f1, f2 = frames[i], frames[i+1]
+        img0 = cv2.imread(os.path.join(opt["input_dir"], f1))
+        img1 = cv2.imread(os.path.join(opt["input_dir"], f2))
+        out, ssim_val = infer(img0, img1, 0.5)
+        save_path = os.path.join(opt["output_dir"], f"img{i:05d}.png")
+        cv2.imwrite(save_path, out)
+        msg = f"[{i+1}/{len(frames)-1}] 저장: {save_path}"
+        if ssim_val is not None: msg += f" | SSIM={ssim_val:.4f}"
+        print(msg)
+
+print(f"🎉 완료! 총 {len(frames)-1}프레임 | 처리시간 {time.time()-start:.2f}s")
