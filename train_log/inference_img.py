@@ -1,6 +1,6 @@
 # =====================================================
 # ✅ [RIFE v4.25 Fine Detail Edition – FP16 + CUDA Stream]
-# - ifnet_hd3_v425.py + flownet_v425.pkl 조합 전용
+# - rf425.py + flownet425.pkl 조합 전용
 # - FP16 가속 / SSIM 선택적 / 1080~2K 안정화
 # =====================================================
 
@@ -12,8 +12,8 @@ from concurrent.futures import ThreadPoolExecutor
 opt = {
     "input_dir": "/content/Practical-RIFE/input_frames",
     "output_dir": "/content/Practical-RIFE/output",
-    "model_py": "/content/Practical-RIFE/train_log/ifnet_hd3_v425.py",
-    "model_path": "/content/Practical-RIFE/train_log/flownet_v425.pkl",
+    "model_py": "/content/Practical-RIFE/train_log/rf425.py",   # ✅ 수정됨
+    "model_path": "/content/Practical-RIFE/train_log/flownet425.pkl",  # ✅ 수정됨
     "device": "cuda" if torch.cuda.is_available() else "cpu",
     "threads": 8,
     "use_ssim": False,
@@ -27,7 +27,7 @@ stream = torch.cuda.Stream(device=device)
 
 # -------------------- 모델 로드 --------------------
 import importlib.util
-spec = importlib.util.spec_from_file_location("model_v425", opt["model_py"])
+spec = importlib.util.spec_from_file_location("model_rf425", opt["model_py"])  # ✅ 수정됨
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 Model = module.Model
