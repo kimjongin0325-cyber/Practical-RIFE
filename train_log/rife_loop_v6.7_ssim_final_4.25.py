@@ -25,6 +25,11 @@ os.makedirs(opt["input_dir"], exist_ok=True)
 os.makedirs(opt["output_dir"], exist_ok=True)
 
 # -------------------- [2] 모델 로드 --------------------
+import sys, os
+BASE_DIR = "/content/Practical-RIFE"  # ✅ 실제 프로젝트 루트
+os.chdir(BASE_DIR)                    # ✅ 작업 디렉토리 이동
+sys.path.append(BASE_DIR)             # ✅ train_log 모듈 인식 보장
+
 from train_log.rf425 import Model  # v4.25도 동일 클래스명 사용
 device = torch.device(opt["device"])
 
