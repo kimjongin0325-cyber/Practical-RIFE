@@ -123,7 +123,15 @@ for i in range(n - 1):
         if ssim_loss is not None:
             # ssim_loss는 DSSIM을 반환하니 SSIM으로 변환
             try:
-                dssim = ssim_loss(to_tensor(out), to_tensor(img1)).item()
+                import torch.nn.functional as F  # 필요 시 자동 보강
+                t_out = to_tensor(out)
+                t_img1 = to_tensor(img1)
+
+                # ✅ SSIM 크기 mismatch 방지용 리사이즈 추가
+                if t_out.shape[-2:] != t_img1.shape[-2:]:
+                    t_out = F.interpolate(t_out, size=t_img1.shape[-2:], mode="bilinear", align_corners=False)
+
+                dssim = ssim_loss(t_out, t_img1).item()
                 ssim_val = 1.0 - (2.0 * dssim)
                 ssim_log.append(ssim_val)
                 print(f"[{i+1}/{n-1}] ✅ {os.path.basename(f0)} ↔ {os.path.basename(f1)} | SSIM={ssim_val:.4f}")
