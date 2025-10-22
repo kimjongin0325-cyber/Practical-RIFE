@@ -25,7 +25,7 @@ os.makedirs(opt["input_dir"], exist_ok=True)
 os.makedirs(opt["output_dir"], exist_ok=True)
 
 # -------------------- [2] 모델 로드 --------------------
-from train_log.RIFE_HDv3 import Model  # v4.25도 동일 클래스명 사용
+from train_log.rf425 import Model  # v4.25도 동일 클래스명 사용
 device = torch.device(opt["device"])
 
 model = Model()
