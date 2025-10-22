@@ -39,12 +39,16 @@ class Model:
     # -----------------------------------------------
     def train(self):
         self.flownet.train()
+        return self   # ✅ 체이닝 허용 (예: model.train().device())
 
     def eval(self):
         self.flownet.eval()
+        return self   # ✅ 체이닝 허용 (예: model.eval().device())
 
     def device(self):
         self.flownet.to(device)
+        return self   # ✅ 체이닝 허용 (다른 메서드와 연속 호출 가능)
+
 
     # -----------------------------------------------
     # ✅ 가중치 로드 (flownet_v425.pkl 전용)
