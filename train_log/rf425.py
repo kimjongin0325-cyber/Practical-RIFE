@@ -10,10 +10,19 @@ from train_log.ifnet425 import *     # ✅ 수정됨 (IFNet_HDv3 → ifnet425)
 import torch.nn.functional as F
 from model.loss import *
 
+# ----------------------------------------------------
+# ✅ 기본 설정
+# ----------------------------------------------------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
+# ====================================================
+# ✅ RIFE v4.25 – 안정형 학습/추론 통합 모델
+# ====================================================
 class Model:
     def __init__(self, local_rank=-1):
+        # -----------------------------------------------
+        # 네트워크 초기화
+        # -----------------------------------------------
         self.flownet = IFNet()
         self.device()
         self.optimG = AdamW(self.flownet.parameters(), lr=1e-6, weight_decay=1e-4)
@@ -21,9 +30,13 @@ class Model:
         self.version = 4.25
         # self.vgg = VGGPerceptualLoss().to(device)
         self.sobel = SOBEL()
+
         if local_rank != -1:
             self.flownet = DDP(self.flownet, device_ids=[local_rank], output_device=local_rank)
 
+    # -----------------------------------------------
+    # 상태 제어
+    # -----------------------------------------------
     def train(self):
         self.flownet.train()
 
@@ -33,48 +46,85 @@ class Model:
     def device(self):
         self.flownet.to(device)
 
+    # -----------------------------------------------
+    # ✅ 가중치 로드 (flownet_v425.pkl 전용)
+    # -----------------------------------------------
     def load_model(self, path, rank=0):
+        import os
+
         def convert(param):
             if rank == -1:
-                return {
-                    k.replace("module.", ""): v
-                    for k, v in param.items()
-                    if "module." in k
-                }
+                return {k.replace("module.", ""): v for k, v in param.items() if "module." in k}
             else:
                 return param
+
         if rank <= 0:
-            if torch.cuda.is_available():
-                self.flownet.load_state_dict(convert(torch.load(f'{path}/flownet.pkl')), False)
+            if os.path.isfile(path):
+                ckpt_path = path
             else:
-                self.flownet.load_state_dict(convert(torch.load(f'{path}/flownet.pkl', map_location='cpu')), False)
-        
+                ckpt_path = os.path.join(path, "flownet_v425.pkl")
+
+            if not os.path.isfile(ckpt_path):
+                raise FileNotFoundError(f"[ERROR] Can't find flownet_v425.pkl under: {path}")
+
+            print(f"[INFO] Using checkpoint: {ckpt_path}")
+            map_location = None if torch.cuda.is_available() else "cpu"
+            state_dict = torch.load(ckpt_path, map_location=map_location)
+            self.flownet.load_state_dict(convert(state_dict), strict=False)
+
+    # -----------------------------------------------
+    # ✅ 가중치 저장 (동일한 이름 규칙)
+    # -----------------------------------------------
     def save_model(self, path, rank=0):
         if rank == 0:
-            torch.save(self.flownet.state_dict(), f'{path}/flownet.pkl')
+            torch.save(self.flownet.state_dict(), f"{path}/flownet_v425.pkl")
+            print(f"[INFO] Model saved to: {path}/flownet_v425.pkl")
 
+    # -----------------------------------------------
+    # ✅ 추론 (Inference)
+    # -----------------------------------------------
     def inference(self, img0, img1, timestep=0.5, scale=1.0):
         imgs = torch.cat((img0, img1), 1)
         scale_list = [16/scale, 8/scale, 4/scale, 2/scale, 1/scale]
         flow, mask, merged = self.flownet(imgs, timestep, scale_list)
         return merged[-1]
-    
+
+    # -----------------------------------------------
+    # ✅ 학습 업데이트 루프 (훈련 전용)
+    # -----------------------------------------------
     def update(self, imgs, gt, learning_rate=0, mul=1, training=True, flow_gt=None):
         for param_group in self.optimG.param_groups:
-            param_group['lr'] = learning_rate
+            param_group["lr"] = learning_rate
+
         img0 = imgs[:, :3]
         img1 = imgs[:, 3:]
+
         if training:
             self.train()
         else:
             self.eval()
+
         scale = [16, 8, 4, 2, 1]
         flow, mask, merged = self.flownet(torch.cat((imgs, gt), 1), scale=scale, training=training)
+
+        # --------------------------
+        # 손실 구성 요소
+        # --------------------------
         loss_l1 = (merged[-1] - gt).abs().mean()
-        loss_smooth = self.sobel(flow[-1], flow[-1]*0).mean()
-        # loss_vgg = self.vgg(merged[-1], gt)
+        loss_smooth = self.sobel(flow[-1], flow[-1] * 0).mean()
+
+        # loss_vgg = self.vgg(merged[-1], gt)  # 필요 시 활성화
+
         if training:
             self.optimG.zero_grad()
-            loss_G = loss_l1 + loss_cons + loss_smooth * 0.1
+            # ✅ loss_cons 제거 (정의 안됨 → 오류 방지)
+            loss_G = loss_l1 + loss_smooth * 0.1
             loss_G.backward()
             self.optimG.step()
+
+            return loss_G.item()
+
+        else:
+            # 평가 모드
+            with torch.no_grad():
+                return loss_l1.item()
